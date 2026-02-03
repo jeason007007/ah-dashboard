@@ -8,7 +8,20 @@
       "mcp__zai-mcp-server__analyze_image",
       "Bash(git init:*)",
       "Bash(git add:*)",
-      "Bash(git commit:*)"
+      "Bash(git commit:*)",
+      "Bash(git remote add:*)",
+      "Bash(git branch:*)",
+      "Bash(git push:*)",
+      "Bash(git config:*)",
+      "Bash(git remote set-url:*)",
+      "Bash(winget install:*)",
+      "Bash(gh auth login:*)",
+      "Bash(refreshcmd)",
+      "Bash(gh:*)",
+      "Bash(powershell.exe:*)",
+      "Bash(GIT_ASKPASS=true git push:*)",
+      "Bash(powershell:*)",
+      "Bash(explorer \"C:\\\\Users\\\\Thinkpad\\\\.gemini\\\\antigravity\\\\playground\\\\ah-dashboard\\\\意健险分析系统-便携版\")"
     ]
   }
 }

@@ -62,7 +62,10 @@ function App() {
             totalCases: 0,
             simpleLossRatio: 0,
             earnedLossRatio: 0,
-            coveredLives: 0
+            coveredLives: 0,
+            largeClaimsCount: 0,
+            largeClaimsAmount: 0,
+            largeClaimsRatio: 0
         };
     }, [mergedData, selectedYear]);
 
@@ -211,15 +214,24 @@ function App() {
                 )}
 
                 {activeTab === 'medical' && (
-                    <MedicalAnalysis mergedData={mergedData} />
+                    <MedicalAnalysis
+                        mergedData={filterDataByYear(mergedData, selectedYear)}
+                        selectedYear={selectedYear}
+                    />
                 )}
 
                 {activeTab === 'risk' && (
-                    <RiskProfiling mergedData={mergedData} />
+                    <RiskProfiling
+                        mergedData={filterDataByYear(mergedData, selectedYear)}
+                        selectedYear={selectedYear}
+                    />
                 )}
 
                 {activeTab === 'ops' && (
-                    <OpsAnalysis mergedData={mergedData} />
+                    <OpsAnalysis
+                        mergedData={filterDataByYear(mergedData, selectedYear)}
+                        selectedYear={selectedYear}
+                    />
                 )}
 
                 {activeTab === 'guide' && (

@@ -51,6 +51,7 @@ const LossTrendAnalysis = ({ trendData }) => {
                                 }}
                                 formatter={(value, name) => {
                                     if (name === 'fullTermLossRatio') return [`${value.toFixed(2)}%`, '满期赔付率'];
+                                    if (name === 'quarterlyLossRatio') return [`${value.toFixed(2)}%`, '季度赔付率'];
                                     if (name === 'writtenPremium') return [`¥${value.toLocaleString()}`, '签单保费'];
                                     return [value, name];
                                 }}
@@ -77,6 +78,18 @@ const LossTrendAnalysis = ({ trendData }) => {
                                 strokeWidth={2}
                                 dot={{ r: 3, fill: '#f59e0b', strokeWidth: 2, stroke: '#fff' }}
                                 activeDot={{ r: 5 }}
+                            />
+                            <Line
+                                yAxisId="left"
+                                type="monotone"
+                                dataKey="quarterlyLossRatio"
+                                name="季度赔付率"
+                                stroke="#10b981"
+                                strokeWidth={2}
+                                strokeDasharray="5 5"
+                                connectNulls={true}
+                                dot={{ r: 4, fill: '#10b981', strokeWidth: 2, stroke: '#fff' }}
+                                activeDot={{ r: 6 }}
                             />
                         </ComposedChart>
                     </ResponsiveContainer>

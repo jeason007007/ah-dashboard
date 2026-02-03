@@ -64,6 +64,12 @@ export const mergeData = (policies, claims) => {
             const policy = policyMap.get(id);
             policy.claims.push(c);
             policy.totalClaimAmount += parseFloat(c['赔款金额']) || 0;
+
+            // 如果保单缺失性别或年龄，从理赔数据中“借用”以补全信息（用于保费分摊统计）
+            if (!policy['性别'] && c['性别']) policy['性别'] = c['性别'];
+            if ((!policy['年龄'] || isNaN(parseInt(policy['年龄']))) && c['年龄']) {
+                policy['年龄'] = c['年龄'];
+            }
         }
     });
 
@@ -78,6 +84,8 @@ export const calculateMetrics = (mergedData, analysisDate = new Date(), filterYe
     let totalEarnedPremium = 0;
     let totalClaims = 0;
     let totalCases = 0;
+    let largeClaimsCount = 0;
+    let largeClaimsAmount = 0;
 
     mergedData.forEach(p => {
         const pStart = new Date(p['个人生效日']);
@@ -101,10 +109,20 @@ export const calculateMetrics = (mergedData, analysisDate = new Date(), filterYe
         // 赔款逻辑：filteredData 里的 claims 已经被 filterDataByYear 过滤过了，直接累加
         totalClaims += p.totalClaimAmount || 0;
         totalCases += p.claims.length;
+
+        // 大额赔案统计 (>25万)
+        p.claims.forEach(c => {
+            const amount = parseFloat(c['赔款金额']) || 0;
+            if (amount > 250000) {
+                largeClaimsCount++;
+                largeClaimsAmount += amount;
+            }
+        });
     });
 
     const simpleLossRatio = totalPremium > 0 ? (totalClaims / totalPremium) : 0;
     const earnedLossRatio = totalEarnedPremium > 0 ? (totalClaims / totalEarnedPremium) : 0;
+    const largeClaimsRatio = totalClaims > 0 ? (largeClaimsAmount / totalClaims) : 0;
 
     return {
         totalPremium,
@@ -115,7 +133,10 @@ export const calculateMetrics = (mergedData, analysisDate = new Date(), filterYe
         simpleLossRatio,
         earnedLossRatio, // 已决赔付率 (已赚)
         fullTermLossRatio: earnedLossRatio, // 满期赔付率 (已决/满期)
-        coveredLives: mergedData.length
+        coveredLives: mergedData.length,
+        largeClaimsCount,
+        largeClaimsAmount,
+        largeClaimsRatio
     };
 };
 
@@ -135,7 +156,15 @@ export const calculateTrendData = (mergedData, analysisDate = new Date()) => {
             // A. 签单保费归属 (一次性归属到生效月)
             const startMonthKey = `${pStart.getFullYear()}-${String(pStart.getMonth() + 1).padStart(2, '0')}`;
             if (!monthlyMap.has(startMonthKey)) {
-                monthlyMap.set(startMonthKey, { month: startMonthKey, premium: 0, claims: 0, earnedPremium: 0, writtenPremium: 0 });
+                monthlyMap.set(startMonthKey, {
+                    month: startMonthKey,
+                    premium: 0,
+                    claims: 0,
+                    earnedPremium: 0,
+                    writtenPremium: 0,
+                    totalBill: 0,
+                    socialSS: 0
+                });
             }
             monthlyMap.get(startMonthKey).writtenPremium += premium;
 
@@ -146,7 +175,15 @@ export const calculateTrendData = (mergedData, analysisDate = new Date()) => {
             while (current <= end && current <= analysisDate) {
                 const monthKey = `${current.getFullYear()}-${String(current.getMonth() + 1).padStart(2, '0')}`;
                 if (!monthlyMap.has(monthKey)) {
-                    monthlyMap.set(monthKey, { month: monthKey, premium: 0, claims: 0, earnedPremium: 0, writtenPremium: 0 });
+                    monthlyMap.set(monthKey, {
+                        month: monthKey,
+                        premium: 0,
+                        claims: 0,
+                        earnedPremium: 0,
+                        writtenPremium: 0,
+                        totalBill: 0,
+                        socialSS: 0
+                    });
                 }
 
                 const monthStart = new Date(current.getFullYear(), current.getMonth(), 1);
@@ -171,19 +208,60 @@ export const calculateTrendData = (mergedData, analysisDate = new Date()) => {
             if (!isNaN(claimDate.getTime())) {
                 const monthKey = `${claimDate.getFullYear()}-${String(claimDate.getMonth() + 1).padStart(2, '0')}`;
                 if (!monthlyMap.has(monthKey)) {
-                    monthlyMap.set(monthKey, { month: monthKey, premium: 0, claims: 0, earnedPremium: 0, writtenPremium: 0 });
+                    monthlyMap.set(monthKey, {
+                        month: monthKey,
+                        premium: 0,
+                        claims: 0,
+                        earnedPremium: 0,
+                        writtenPremium: 0,
+                        totalBill: 0,
+                        socialSS: 0
+                    });
                 }
                 monthlyMap.get(monthKey).claims += parseFloat(c['赔款金额']) || 0;
+                // Add bill and social security aggregation
+                monthlyMap.get(monthKey).totalBill += parseFloat(c['账单金额']) || 0;
+                monthlyMap.get(monthKey).socialSS += parseFloat(c['统筹金额']) || 0;
             }
         });
     });
 
-    return Array.from(monthlyMap.values())
+    const sortedData = Array.from(monthlyMap.values())
         .sort((a, b) => a.month.localeCompare(b.month))
         .map(item => ({
             ...item,
             fullTermLossRatio: item.earnedPremium > 0 ? (item.claims / item.earnedPremium) * 100 : 0
         }));
+
+    // 计算季度赔付率
+    // 1. Group by Quarter
+    const quarterlyAcc = {};
+    sortedData.forEach((item, index) => {
+        const [year, month] = item.month.split('-');
+        const qIndex = Math.floor((parseInt(month) - 1) / 3) + 1;
+        const qKey = `${year}-Q${qIndex}`;
+
+        if (!quarterlyAcc[qKey]) {
+            quarterlyAcc[qKey] = { claims: 0, earnedPremium: 0, lastIndex: -1 };
+        }
+        quarterlyAcc[qKey].claims += item.claims;
+        quarterlyAcc[qKey].earnedPremium += item.earnedPremium;
+        // Keep track of the latest month index for this quarter to assign the value later
+        // Usually we want to assign strictly to 03, 06, 09, 12, but if data ends early, we might assign to the last available
+        // For visual alignment with "Quarterly Trend", assigning to the quarter-end month is safest.
+        if (['03', '06', '09', '12'].includes(month)) {
+            quarterlyAcc[qKey].lastIndex = index;
+        }
+    });
+
+    // 2. Assign Quarterly Ratio to the quarter-end month
+    Object.values(quarterlyAcc).forEach(q => {
+        if (q.lastIndex !== -1 && q.earnedPremium > 0) {
+            sortedData[q.lastIndex].quarterlyLossRatio = (q.claims / q.earnedPremium) * 100;
+        }
+    });
+
+    return sortedData;
 };
 
 /**
@@ -210,24 +288,31 @@ export const getAvailableYears = (mergedData) => {
  * 按年度对保单和理赔进行切片过滤
  */
 export const filterDataByYear = (mergedData, year) => {
-    if (!year || year === 'all') return mergedData;
+    if (!year || year === 'all') {
+        return mergedData;
+    }
 
+    const targetYear = parseInt(year);
     const filtered = [];
+
     mergedData.forEach(p => {
         const pStart = new Date(p['个人生效日']);
         const pEnd = new Date(p['个人满期日']);
 
-        // 保单只要在这一年内有存续就算
-        const yearStart = new Date(year, 0, 1);
-        const yearEnd = new Date(year, 11, 31, 23, 59, 59);
+        // 核心逻辑：保单只要在目标年份内有任何一天的保障期限，就属于该年度统计范围
+        const yearStart = new Date(targetYear, 0, 1);
+        const yearEnd = new Date(targetYear, 11, 31, 23, 59, 59);
 
+        // 如果保单在目标年份有交叉
         if (pStart <= yearEnd && pEnd >= yearStart) {
-            // 复制一份保单，仅保留该年度的理赔
-            const yearClaims = p.claims.filter(c => {
+            // 仅提取属于该年度的理赔记录
+            const yearClaims = (p.claims || []).filter(c => {
                 const cDate = new Date(c['出险日期']);
-                return cDate.getFullYear() === parseInt(year);
+                return !isNaN(cDate.getTime()) && cDate.getFullYear() === targetYear;
             });
 
+            // 计算该年度内的已赚保费在这个函数外部由 calculateMetrics -> calculateEarnedPremium 处理
+            // 这里我们返回一个新的保单对象，其 claims 为过滤后的理赔
             filtered.push({
                 ...p,
                 claims: yearClaims,
@@ -263,6 +348,11 @@ export const validateStructure = (data, type) => {
         '个人保单号',
         '出险日期',
         '赔款金额'
+        // '报案时间', '立案时间', '结案日期' are critical for ops but strictly required for basic claims processing?
+        // Let's keep them optional in structure check to avoid blocking upload if user strictly wants Payout analysis,
+        // but Logic check will warn if missing.
+        // Actually user specifically asked for Ops Analysis, so maybe good to warn.
+        // But for consistency with previous code, I'll rely on logic validation to warn about missing ops fields.
     ];
 
     const targetCols = type === 'policy' ? requiredPolicyCols : requiredClaimCols;
@@ -282,8 +372,9 @@ export const validateStructure = (data, type) => {
 /**
  * 校验业务逻辑 (Data Consistency)
  * 检查：
- * 1. 结案日期 >= 报案日期 >= 出险日期
- * 2. 报案日期/结案日期是否存在 (Warning)
+ * 1. 结案日期 >= 立案时间 >= 报案时间 >= 出险日期
+ * 2. 运营关键字段是否存在 (Warning)
+ * 3. 字段日期是否有效
  */
 export const validateLogic = (mergedData) => {
     let invalidDates = 0;
@@ -294,16 +385,28 @@ export const validateLogic = (mergedData) => {
         p.claims.forEach(c => {
             totalClaims++;
             const injuryDate = new Date(c['出险日期']);
-            const reportDate = new Date(c['报案日期']);
-            const closeDate = new Date(c['结案日期']);
+            const reportDate = new Date(c['报案时间'] || c['报案日期']); // Support both
+            const registerDate = new Date(c['立案时间'] || c['立案日期']); // Support both
+            const closeDate = new Date(c['结案日期'] || c['结案时间']);   // Support both
 
             // 检查运营日期是否存在
+            // 只要缺一个环节，就无法进行完整时效分析
             if (isNaN(reportDate.getTime()) || isNaN(closeDate.getTime())) {
                 missingOpsDates++;
             } else {
                 // 检查日期逻辑顺序
-                // 允许同一天，所以用 < 检查
-                if (reportDate < injuryDate || closeDate < reportDate) {
+                // 预期：出险 <= 报案 <= 立案 <= 结案
+                // 允许立案时间缺失（旧数据可能没有），此时只检查 报案 <= 结案
+                // 允许同一天，所以用 < 检查作为错误条件
+                const hasRegister = !isNaN(registerDate.getTime());
+
+                let isValidSequence = true;
+                if (reportDate < injuryDate) isValidSequence = false;
+                if (hasRegister && registerDate < reportDate) isValidSequence = false;
+                if (hasRegister && closeDate < registerDate) isValidSequence = false;
+                if (!hasRegister && closeDate < reportDate) isValidSequence = false;
+
+                if (!isValidSequence) {
                     invalidDates++;
                 }
             }
@@ -312,10 +415,10 @@ export const validateLogic = (mergedData) => {
 
     const warnings = [];
     if (invalidDates > 0) {
-        warnings.push(`发现 ${invalidDates} 条理赔数据的日期逻辑有误 (如: 报案早于出险)`);
+        warnings.push(`发现 ${invalidDates} 条理赔数据的日期逻辑有误 (如: 报案早于出险 或 结案早于立案)`);
     }
     if (missingOpsDates > 0) {
-        warnings.push(`发现 ${missingOpsDates} 条理赔数据缺少报案或结案日期，将影响运营分析`);
+        warnings.push(`发现 ${missingOpsDates} 条理赔数据缺少关键运营时间节点，将影响时效分析`);
     }
 
     return {

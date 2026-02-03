@@ -1,5 +1,5 @@
 import React from 'react';
-import { TrendingUp, Users, DollarSign, Percent } from 'lucide-react';
+import { TrendingUp, Users, DollarSign, Percent, AlertCircle } from 'lucide-react';
 
 const MetricCard = ({ title, value, unit, icon: Icon, color, trend }) => (
     <div className="metric-card">
@@ -62,6 +62,33 @@ const MetricsGrid = ({ metrics }) => {
                 icon={Percent}
                 color={metrics.fullTermLossRatio > 0.8 ? 'red' : 'indigo'}
             />
+
+            {/* 大额赔案分析 (>25万) */}
+            {metrics.largeClaimsCount > 0 && (
+                <>
+                    <MetricCard
+                        title="大案笔数 (>25万)"
+                        value={metrics.largeClaimsCount}
+                        unit="件"
+                        icon={AlertCircle}
+                        color="red"
+                    />
+                    <MetricCard
+                        title="大案累计金额"
+                        value={formatCurrency(metrics.largeClaimsAmount)}
+                        unit="¥"
+                        icon={DollarSign}
+                        color="red"
+                    />
+                    <MetricCard
+                        title="大案金额占比"
+                        value={formatPercent(metrics.largeClaimsRatio)}
+                        unit="%"
+                        icon={Percent}
+                        color="red"
+                    />
+                </>
+            )}
         </div>
     );
 };
